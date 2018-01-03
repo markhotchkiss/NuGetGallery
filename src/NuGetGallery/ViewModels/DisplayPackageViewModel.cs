@@ -4,6 +4,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using NuGet.Services.Validation;
 using NuGet.Services.Validation.Issues;
 using NuGet.Versioning;
 
@@ -69,7 +70,7 @@ namespace NuGetGallery
             }
         }
 
-        public IReadOnlyList<string> ValidationIssues { get; set; }
+        public IReadOnlyCollection<ValidationIssueCode> ValidationIssueCodes { get; set; }
         public DependencySetsViewModel Dependencies { get; set; }
         public IEnumerable<DisplayPackageViewModel> PackageVersions { get; set; }
         public string Copyright { get; set; }

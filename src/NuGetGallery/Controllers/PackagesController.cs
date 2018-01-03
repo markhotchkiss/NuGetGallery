@@ -443,8 +443,8 @@ namespace NuGetGallery
 
             var validationIssues = _validationService.GetLatestValidationIssues(package);
 
-            model.ValidationIssues = validationIssues
-                                        .Select(i => i.GetMessage())
+            model.ValidationIssueCodes = validationIssues
+                                        .Select(i => i.IssueCode)
                                         .Distinct()
                                         .ToList();
 
