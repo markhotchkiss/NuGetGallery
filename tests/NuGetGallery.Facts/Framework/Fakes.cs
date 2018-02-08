@@ -63,7 +63,8 @@ namespace NuGetGallery.Framework
                 Credentials = new List<Credential>
                 {
                     credentialBuilder.CreatePasswordCredential(Password)
-                }
+                },
+                MemberRequests = new List<MembershipRequest>()
             };
             
             CreateOrganizationUsers(ref key, credentialBuilder, "", out var organization, out var organizationAdmin, out var organizationCollaborator);
@@ -263,7 +264,8 @@ namespace NuGetGallery.Framework
                 Credentials = new List<Credential>
                 {
                     credentialBuilder.CreatePasswordCredential(Password)
-                }
+                },
+                MemberRequests = new List<MembershipRequest>()
             };
 
             admin = new User("testOrganizationAdmin" + suffix)
