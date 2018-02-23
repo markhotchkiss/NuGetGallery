@@ -2,7 +2,6 @@
 // Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
 
 using System;
-using System.Collections.Generic;
 using System.Data.Entity;
 using System.IO;
 using System.IO.Compression;
@@ -12,8 +11,8 @@ using Moq;
 using NuGet.Packaging;
 using NuGetGallery.Framework;
 using NuGetGallery.Packaging;
-using Xunit;
 using NuGetGallery.TestUtils;
+using Xunit;
 
 namespace NuGetGallery
 {
@@ -23,6 +22,7 @@ namespace NuGetGallery
             Mock<IEntitiesContext> entitiesContext = null,
             Mock<PackageService> packageService = null,
             Mock<IPackageFileService> packageFileService = null,
+            Mock<ITelemetryService> telemetryService = null,
             Action<Mock<ReflowPackageService>> setup = null)
         {
             var dbContext = new Mock<DbContext>();
@@ -31,18 +31,17 @@ namespace NuGetGallery
 
             packageService = packageService ?? new Mock<PackageService>();
             packageFileService = packageFileService ?? new Mock<IPackageFileService>();
+            telemetryService = telemetryService ?? new Mock<ITelemetryService>();
 
             var reflowPackageService = new Mock<ReflowPackageService>(
                 entitiesContext.Object,
                 packageService.Object,
-                packageFileService.Object);
+                packageFileService.Object,
+                telemetryService.Object);
 
             reflowPackageService.CallBase = true;
 
-            if (setup != null)
-            {
-                setup(reflowPackageService);
-            }
+            setup?.Invoke(reflowPackageService);
 
             return reflowPackageService.Object;
         }
@@ -264,6 +263,32 @@ namespace NuGetGallery
             }
 
             [Fact]
+            public async Task EmitsTelemetry()
+            {
+                // Arrange
+                var package = PackageServiceUtility.CreateTestPackage();
+
+                var packageService = SetupPackageService(package);
+                var entitiesContext = SetupEntitiesContext();
+                var packageFileService = SetupPackageFileService(package);
+                var telemetryService = new Mock<ITelemetryService>();
+
+                var service = CreateService(
+                    packageService: packageService,
+                    entitiesContext: entitiesContext,
+                    packageFileService: packageFileService,
+                    telemetryService: telemetryService);
+
+                // Act
+                var result = await service.ReflowAsync("test", "1.0.0");
+
+                // Assert
+                telemetryService.Verify(
+                    x => x.TrackPackageReflow(package),
+                    Times.Once);
+            }
+
+            [Fact]
             public async Task AllowsInvalidPackageDependencyVersion()
             {
                 // Arrange
@@ -312,12 +337,14 @@ namespace NuGetGallery
                     packageRegistrationRepository.Object,
                     packageRepository.Object);
             var auditingService = new TestAuditingService();
+            var telemetryService = new Mock<ITelemetryService>();
 
             var packageService = new Mock<PackageService>(
                 packageRegistrationRepository.Object,
                 packageRepository.Object,
                 packageNamingConflictValidator,
-                auditingService);
+                auditingService,
+                telemetryService.Object);
 
             packageService.CallBase = true;
 
@@ -365,50 +392,27 @@ namespace NuGetGallery
             return entitiesContext;
         }
 
-        private static Mock<IPackageFileService> SetupPackageFileService(Package package, Stream packageStream = null)
+        private static Mock<IPackageFileService> SetupPackageFileService(Package package)
         {
             var packageFileService = new Mock<IPackageFileService>();
 
             packageFileService
                 .Setup(s => s.DownloadPackageFileAsync(package))
-                .Returns(Task.FromResult(packageStream ?? CreateTestPackageStream()))
+                .Returns(Task.FromResult(CreateTestPackageStream()))
                 .Verifiable();
 
             return packageFileService;
         }
 
-        private static Stream CreateInvalidDependencyVersionTestPackageStream()
-        {
-            return CreateTestPackageStream(@"<?xml version=""1.0""?>
-                    <package xmlns=""http://schemas.microsoft.com/packaging/2011/08/nuspec.xsd"">
-                      <metadata>
-                        <id>test</id>
-                        <version>1.0.0</version>
-                        <title>Test package</title>
-                        <authors>authora, authorb</authors>
-                        <owners>ownera</owners>
-                        <requireLicenseAcceptance>false</requireLicenseAcceptance>
-                        <description>package A description.</description>
-                        <language>en-US</language>
-                        <projectUrl>http://www.nuget.org/</projectUrl>
-                        <iconUrl>http://www.nuget.org/</iconUrl>
-                        <licenseUrl>http://www.nuget.org/</licenseUrl>
-                        <dependencies>
-                            <group targetFramework=""net40"">
-                              <dependency id=""WebActivator"" version="""" />
-                              <dependency id=""PackageC"" version=""[1.1.0, 2.0.1)"" />
-                            </group>
-                            <group targetFramework=""net451"">
-                              <dependency id=""jQuery"" version=""$version$""/>
-                            </group>
-                        </dependencies>
-                      </metadata>
-                    </package>");
-        }
-
         private static Stream CreateTestPackageStream()
         {
-            return CreateTestPackageStream(@"<?xml version=""1.0""?>
+            var packageStream = new MemoryStream();
+            using (var packageArchive = new ZipArchive(packageStream, ZipArchiveMode.Create, true))
+            {
+                var nuspecEntry = packageArchive.CreateEntry("TestPackage.nuspec", CompressionLevel.Fastest);
+                using (var streamWriter = new StreamWriter(nuspecEntry.Open()))
+                {
+                    streamWriter.WriteLine(@"<?xml version=""1.0""?>
                     <package xmlns=""http://schemas.microsoft.com/packaging/2011/08/nuspec.xsd"">
                       <metadata>
                         <id>test</id>
@@ -433,17 +437,6 @@ namespace NuGetGallery
                         </dependencies>
                       </metadata>
                     </package>");
-        }
-
-        private static Stream CreateTestPackageStream(string nuspec)
-        {
-            var packageStream = new MemoryStream();
-            using (var packageArchive = new ZipArchive(packageStream, ZipArchiveMode.Create, true))
-            {
-                var nuspecEntry = packageArchive.CreateEntry("TestPackage.nuspec", CompressionLevel.Fastest);
-                using (var streamWriter = new StreamWriter(nuspecEntry.Open()))
-                {
-                    streamWriter.WriteLine(nuspec);
                 }
 
                 packageArchive.CreateEntry("content\\HelloWorld.cs", CompressionLevel.Fastest);
